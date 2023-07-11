@@ -1,0 +1,477 @@
+Option Explicit
+Public wbRAI As Workbook
+Public wbBQE As Workbook
+Public wsName() As Variant
+Sub Template()
+
+    Application.ScreenUpdating = False
+    Application.StatusBar = "Generating Files , Please wait..."
+    
+    
+    
+    Dim ASIN() As Variant
+    Dim i As Long
+    Dim BQE_File As Variant
+  
+    
+    With Application.FileDialog(msoFileDialogOpen)
+     
+    .InitialFileName = "C:\Users\" & Environ("Username") & "\Downloads\"
+    .AllowMultiSelect = False
+    .Show
+    .Title = "Select the BQE File"
+    
+    For Each BQE_File In .SelectedItems
+        Set wbBQE = Workbooks.Open(BQE_File)
+    Next
+    
+    If wbBQE Is Nothing Then
+        MsgBox "Please Select the BQE File and Try again."
+        Exit Sub
+    End If
+    
+    wbBQE.Application.WindowState = xlMinimized
+    
+    End With
+    
+    Set wbRAI = Workbooks.Open(Trim(ThisWorkbook.Sheets("Macro").Range("F2").value))
+    
+    wsName = Array("Schema", "Title", "Product Overview", "Bullet Points", "Product Description", "Product Information", "Summary")
+    
+    With ThisWorkbook.Sheets("Macro")
+        
+        ASIN = Unique(.Range("A2:A" & .Cells(Rows.Count, 1).End(xlUp).Row))
+    
+        For i = LBound(ASIN) To UBound(ASIN)
+        
+          
+        If IsError(Application.match(Right(ASIN(i), 10), wbBQE.Sheets(1).Columns(1), 0)) Then
+        .Range("C2:C" & .Cells(Rows.Count, "C").End(xlUp).Row).Find(what:=Right(ASIN(i), 10), LookIn:=xlValues).Interior.Color = vbRed
+        End If
+        
+        Call CreateWorkbook(Trim(ASIN(i)), wsName)
+         
+        Next
+       
+    End With
+    
+    wbRAI.Close False
+    wbBQE.Close False
+    
+    
+    MsgBox "Files Successfully Generated"
+    
+    Application.StatusBar = False
+    
+    
+    
+    
+End Sub
+Function Unique(rng As Range) As Variant
+
+    Dim cell As Range
+
+    With CreateObject("Scripting.Dictionary")
+        For Each cell In rng
+            If Not cell.Value2 = "" Then
+                .Item(Trim(cell.Value2)) = 1
+            End If
+            Next
+            Unique = .Keys
+        End With
+
+End Function
+Function CreateWorkbook(ByVal ASIN As Variant, wsName As Variant)
+    
+    Dim Output_Folder As String
+    Dim wbTarget As Workbook
+    Dim wsTemp As Worksheet
+    Dim PTrng, cell As Range
+    Dim Attr As Variant
+    Dim i, j, lr As Long
+    Dim RArng As Range
+    Dim moduleCode As String
+
+    Dim xPro As VBIDE.VBProject
+    Dim xCom As VBIDE.vbComponent
+    Dim xMod As VBIDE.codeModule
+    Dim xLine As Long
+    
+    Set RArng = ThisWorkbook.Sheets("Attributes").UsedRange
+    Set PTrng = ThisWorkbook.Sheets("Macro").Range("A2:B" & ThisWorkbook.Sheets("Macro").Cells(Rows.Count, 1).End(xlUp).Row)
+    Set wsTemp = ThisWorkbook.Sheets("Template")
+    
+    Output_Folder = ThisWorkbook.Sheets("Macro").Range("F1").value
+    Set wbTarget = Workbooks.Add
+    
+     moduleCode = ThisWorkbook.VBProject.VBComponents("Highlighter").codeModule.Lines(1, _
+        ThisWorkbook.VBProject.VBComponents("Highlighter").codeModule.CountOfLines)
+ 
+     
+    With wbTarget
+
+            
+            With .Sheets(1)
+        
+            .Name = wsName(0)
+        
+                With wsTemp
+            
+                    .Activate
+                    Cells.Find(what:=wsName(0), After:=ActiveCell, LookIn:=xlFormulas, LookAt:= _
+                    xlPart, SearchOrder:=xlByRows, SearchDirection:=xlNext, MatchCase:=False _
+                    , SearchFormat:=False).Activate
+                    
+                    ActiveCell.Offset(1).EntireRow.Copy wbTarget.Sheets(wsName(0)).Range("A1")
+             
+                    With wbRAI.Sheets(1)
+             
+                    .AutoFilterMode = False
+             
+                    .Range("A1").AutoFilter Field:=2, Criteria1:=Trim(UCase(Application.VLookup(ASIN, PTrng, 2, 0)))
+                    .Range("B2:E" & .Cells(Rows.Count, 2).End(xlUp).Row).SpecialCells(xlCellTypeVisible).Copy _
+                    wbTarget.Sheets(wsName(0)).Range("A2")
+                          
+                    End With
+                            
+                End With
+                            
+            
+            
+            For Each cell In .Range("E2:E" & .Cells(Rows.Count, 1).End(xlUp).Row)
+            
+            
+                cell.Value2 = Application.VLookup(Right(ASIN, 10), wbBQE.Sheets(1).UsedRange, _
+                        Application.match(cell.Offset(0, -3).value, wbBQE.Sheets(1).UsedRange.Rows(1), 0), 0)
+                
+                If IsError(cell.value) Then
+                    cell.Value2 = "NA"
+                Else
+                    If Application.CountIf(RArng.Columns(2), cell.Offset(0, -3).value) > 0 Then
+                        cell.Value2 = ExtractText(cell.Value2)
+                    Else
+                        cell.Value2 = ExtractValuesFromString(cell.Value2)
+                    End If
+                End If
+                
+                If cell.value = "" Then
+                     cell.Value2 = "NA"
+                End If
+                
+                cell.WrapText = True
+                cell.ColumnWidth = 30
+                cell.EntireRow.VerticalAlignment = xlTop
+            Next
+            
+            For i = .Cells(Rows.Count, 2).End(xlUp).Row To 2 Step -1
+            
+                Set cell = .Cells(i, 2)
+                
+                If Application.CountIf(RArng.Columns(1), cell.value) > 0 Then
+                    cell.EntireRow.Delete
+                End If
+            
+            Next
+            
+            .UsedRange.EntireColumn.AutoFit
+            .UsedRange.Borders.LineStyle = xlContinuous
+           
+            End With
+        
+        
+            For i = LBound(wsName) + 1 To UBound(wsName)
+            
+                .Sheets.Add(After:=.Sheets(.Sheets.Count)).Name = wsName(i)
+                
+                With wsTemp
+                
+                .Activate
+                Cells.Find(what:=wsName(i), After:=ActiveCell, LookIn:=xlFormulas, LookAt:= _
+                        xlPart, SearchOrder:=xlByRows, SearchDirection:=xlNext, MatchCase:=False _
+                        , SearchFormat:=False).Activate
+                        
+                If wsName(i) <> "Summary" Then
+                    ActiveCell.Offset(1).EntireRow.Copy wbTarget.Sheets(wsName(i)).Range("A1")
+                Else
+                    Range(ActiveCell.Offset(1), Cells(ActiveCell.End(xlDown).Row, ActiveCell.Offset(0, 1).Column)).Copy wbTarget.Sheets(wsName(i)).Range("A1")
+                End If
+                
+                End With
+                
+                With wbTarget.Sheets(wsName(i))
+                
+                If wsName(i) = "Title" Or wsName(i) = "Bullet Points" Or wsName(i) = "Product Description" Then
+                   
+                    If wsName(i) = "Title" Then
+                    .Range("A2").Value2 = Application.VLookup(Right(ASIN, 10), wbBQE.Sheets(1).UsedRange, _
+                            Application.match("item_name", wbBQE.Sheets(1).UsedRange.Rows(1), 0), 0)
+                    
+                    
+                    ElseIf wsName(i) = "Bullet Points" Then
+                    .Range("A2").Value2 = Application.VLookup(Right(ASIN, 10), wbBQE.Sheets(1).UsedRange, _
+                            Application.match("bullet_point", wbBQE.Sheets(1).UsedRange.Rows(1), 0), 0)
+                    
+                            
+                    ElseIf wsName(i) = "Product Description" Then
+                    .Range("A2").Value2 = Application.VLookup(Right(ASIN, 10), wbBQE.Sheets(1).UsedRange, _
+                            Application.match("product_description", wbBQE.Sheets(1).UsedRange.Rows(1), 0), 0)
+                
+                    
+                    End If
+                    
+    
+                    If IsError(.Range("A2").value) Then
+                        .Range("A2").Value2 = "NA"
+                    ElseIf .Range("A2").value = "" Then
+                        .Range("A2").Value2 = "NA"
+                    Else
+                        .Range("A2").Value2 = ExtractValueFromString(.Range("A2").Value2)
+                        .Range("A2").WrapText = True
+                        .Range("A2").VerticalAlignment = xlTop
+                    End If
+                
+                End If
+                    
+                    If wsName(i) = "Summary" Then
+                        
+                        .Range("B2").Value2 = Environ("Username")
+                        .Range("B4").Value2 = Right(ASIN, 10)
+                        .Range("B5").Value2 = "US"
+                        .Range("B6").Value2 = Application.VLookup(ASIN, PTrng, 2, 0)
+                        
+                    End If
+                      
+                
+                
+                End With
+                
+                wbTarget.Sheets(wsName(i)).UsedRange.EntireColumn.AutoFit
+                wbTarget.Sheets(wsName(i)).UsedRange.EntireRow.AutoFit
+                
+            Next
+            
+            ThisWorkbook.Sheets("Restricted Words").Copy _
+            After:=wbTarget.Sheets(wbTarget.Sheets.Count)
+            wbTarget.Sheets("Restricted Words").Visible = False
+            
+            
+            For j = LBound(wsName) To UBound(wsName)
+
+                If wsName(j) = "Title" Or wsName(j) = "Bullet Points" Or wsName(j) = "Product Description" Or wsName(j) = "Summary" Then
+                   
+                 With wbTarget
+                        .Application.VBE.MainWindow.WindowState = vbext_ws_Minimize
+                                                
+                        
+                        Set xPro = .VBProject
+                        If wsName(j) = "Title" Then
+                            Set xCom = xPro.VBComponents("Sheet2")
+                        ElseIf wsName(j) = "Bullet Points" Then
+                            Set xCom = xPro.VBComponents("Sheet4")
+                        ElseIf wsName(j) = "Product Description" Then
+                            Set xCom = xPro.VBComponents("Sheet5")
+                        ElseIf wsName(j) = "Summary" Then
+                            Set xCom = xPro.VBComponents("Sheet7")
+                        End If
+                        Set xMod = xCom.codeModule
+
+                        With xMod
+                        
+                        xLine = .CreateEventProc("Change", "Worksheet")
+                            If xLine > 0 Then
+                                i = .CountOfLines
+                                .DeleteLines xLine, i - xLine + 1
+                            End If
+                         xLine = xLine + 1
+                        .InsertLines xLine, moduleCode
+                        
+                        End With
+
+                    End With
+                    
+                End If
+            Next
+            
+            wbTarget.SaveAs Output_Folder & Right(ASIN, 10) & "_" & Environ("Username"), xlOpenXMLWorkbookMacroEnabled
+            wbTarget.Close True
+    
+    End With
+      
+    Application.VBE.MainWindow.Visible = False
+End Function
+
+Function ExtractValuesFromString(val As String) As String
+    Dim ExtractValues As String
+    Dim regEx As Object
+    Dim matches As Object
+    Dim match As Object
+    Dim valuePattern As String
+    
+    ' Initialize variables
+    ExtractValues = ""
+    Set regEx = CreateObject("VBScript.RegExp")
+    regEx.Global = True
+    regEx.pattern = "\bvalue:\s*(?:(?:""(.*?)"")|(.*?))(?:\s*(?:}|,)|$)"
+    
+    ' Find all matches of value pattern in the input string
+    Set matches = regEx.Execute(val)
+    
+    ' Iterate through the matches and extract the values
+    For Each match In matches
+        ' Append the value to the result
+        If match.Submatches(0) <> "" Then
+            If ExtractValues = "" Then
+                ExtractValues = match.Submatches(0)
+            Else
+                ExtractValues = ExtractValues & ", " & match.Submatches(0)
+            End If
+        ElseIf match.Submatches(1) <> "" Then
+            If ExtractValues = "" Then
+                ExtractValues = match.Submatches(1)
+            Else
+                ExtractValues = ExtractValues & ", " & match.Submatches(1)
+            End If
+        End If
+    Next match
+    
+    ExtractValuesFromString = ExtractValues
+End Function
+
+Function ExtractText(inputString As String) As String
+    ' Scenario 1: Extract dimensions with dynamic units
+    If InStr(inputString, "width:") > 0 And InStr(inputString, "length:") > 0 And InStr(inputString, "height:") > 0 Then
+        Dim widthStart As Long
+        Dim widthEnd As Long
+        Dim lengthStart As Long
+        Dim lengthEnd As Long
+        Dim heightStart As Long
+        Dim heightEnd As Long
+        
+        widthStart = InStr(inputString, "width:")
+        widthEnd = InStr(widthStart, inputString, "}")
+        
+        lengthStart = InStr(inputString, "length:")
+        lengthEnd = InStr(lengthStart, inputString, "}")
+        
+        heightStart = InStr(inputString, "height:")
+        heightEnd = InStr(heightStart, inputString, "}")
+        
+        Dim widthValue As Double
+        Dim lengthValue As Double
+        Dim heightValue As Double
+        Dim unit As String
+        
+        widthValue = GetValue(inputString, widthStart, widthEnd)
+        lengthValue = GetValue(inputString, lengthStart, lengthEnd)
+        heightValue = GetValue(inputString, heightStart, heightEnd)
+        
+        Dim normalizedValueStart As Long
+        Dim normalizedValueEnd As Long
+        
+        normalizedValueStart = InStr(widthEnd, inputString, "normalized_value")
+        normalizedValueEnd = InStr(normalizedValueStart, inputString, "}")
+        
+        unit = GetUnit(inputString, normalizedValueStart, normalizedValueEnd)
+        
+        ExtractText = widthValue & " x " & lengthValue & " x " & heightValue & " " & unit
+        Exit Function
+    End If
+    
+    ' Scenario 2: Extract weight with dynamic units
+    If InStr(inputString, "unit:") > 0 And InStr(inputString, "value:") > 0 Then
+        Dim valueStart As Long
+        Dim valueEnd As Long
+        Dim unitStart As Long
+        Dim unitEnd As Long
+        
+        valueStart = InStr(inputString, "value:")
+        valueEnd = InStr(valueStart, inputString, " ")
+        
+        unitStart = InStr(inputString, "unit:")
+        unitEnd = InStr(unitStart, inputString, ",")
+        
+        Dim value As Double
+        'Dim unit As String
+        
+        value = GetValue(inputString, valueStart, valueEnd)
+        unit = GetUnit(inputString, unitStart, unitEnd)
+        
+        ExtractText = value & " " & unit
+        Exit Function
+    End If
+    
+    ' Return empty string if none of the scenarios match
+    ExtractText = ""
+End Function
+
+Function GetValue(inputString As String, startIdx As Long, endIdx As Long) As Double
+    Dim valueString As String
+    valueString = Mid(inputString, startIdx, endIdx - startIdx)
+    
+    Dim regEx As Object
+    Set regEx = CreateObject("VBScript.RegExp")
+    
+    regEx.pattern = "[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?"
+    
+    If regEx.test(valueString) Then
+        Dim matches As Object
+        Set matches = regEx.Execute(valueString)
+        
+        Dim value As Double
+        value = CDbl(matches(0).value)
+        
+        GetValue = value
+    Else
+        GetValue = 0
+    End If
+End Function
+
+Function GetUnit(inputString As String, startIdx As Long, endIdx As Long) As String
+    Dim unitString As String
+    unitString = Mid(inputString, startIdx, endIdx - startIdx)
+    
+    Dim unit As String
+    unit = Trim(Split(unitString, "unit:")(1))
+    unit = Trim(Split(unit, ",")(0))
+    unit = Replace(unit, "}", "") ' Remove the closing brace if present
+    
+    GetUnit = unit
+End Function
+
+Function ExtractValueFromString(val As String) As String
+    Dim ExtractValues As String
+    Dim regEx As Object
+    Dim matches As Object
+    Dim match As Object
+    Dim valuePattern As String
+    
+    ' Initialize variables
+    ExtractValues = ""
+    Set regEx = CreateObject("VBScript.RegExp")
+    regEx.Global = True
+    regEx.pattern = "\bvalue:\s*(?:(?:""(.*?)"")|(.*?))(?:\s*(?:}|,)|$)"
+    
+    ' Find all matches of value pattern in the input string
+    Set matches = regEx.Execute(val)
+    
+    ' Iterate through the matches and extract the values
+    For Each match In matches
+        ' Append the value to the result
+        If match.Submatches(0) <> "" Then
+            If ExtractValues = "" Then
+                ExtractValues = match.Submatches(0)
+            Else
+                ExtractValues = ExtractValues & " " & Chr(149) & match.Submatches(0)
+            End If
+        ElseIf match.Submatches(1) <> "" Then
+            If ExtractValues = "" Then
+                ExtractValues = match.Submatches(1)
+            Else
+                ExtractValues = ExtractValues & " " & Chr(149) & match.Submatches(1)
+            End If
+        End If
+    Next match
+    
+    ExtractValueFromString = ExtractValues
+End Function
+
